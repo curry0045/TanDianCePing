@@ -39,17 +39,21 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
     @Resource
     StringRedisTemplate stringRedisTemplate;
 
+    @Resource
+    private CacheClient cacheClient;
 
     @Override
     public Result queryById(Long id) {
         //解决缓存穿透
         //Shop shop = queryWithPassThrough(id);
+        //使用缓存工具类来实现
+        Shop shop = cacheClient.queryWithPassThrough(CACHE_SHOP_KEY, id, Shop.class, this::getById, CACHE_SHOP_TTL, TimeUnit.MINUTES);
 
         //互斥锁解决缓存击穿
         //Shop shop = queryWithMutex(id);
 
         //逻辑过期解决缓存击穿
-        Shop shop = queryWithLogicalExpire(id);
+        //Shop shop = queryWithLogicalExpire(id);
 
         if (shop == null){
             return Result.fail("店铺不存在");
@@ -109,44 +113,44 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
     }
 
     //解决缓存穿透问题
-    public Shop queryWithPassThrough(Long id) {
-        String key = CACHE_SHOP_KEY + id;
-        //1.从redis查询商铺缓存
-        String shopJson = stringRedisTemplate.opsForValue().get(key);
-        //2.判断是否存在
-        if (StrUtil.isNotBlank(shopJson)) {
-            //3.存在，直接返回
-            //JSONUtil.toBean --> Json转对象
-            Shop shop = JSONUtil.toBean(shopJson, Shop.class);
-            return shop;
-        }
-        // 判断命中的是否是空值  （击穿问题）
-        if (shopJson != null) {
-            //返回错误信息
-            return null;
-        }
-
-        //4. 不存在 根据id查询数据库
-        Shop shop = getById(id);
-
-
-        //4. case1 数据库中不存在，返回错误
-        if (shop == null) {
-            //将空值写入redis （击穿问题）
-            //这里设置为“”之后 再去看 shopJson != null 的判断 能直接返回错误信息 从而不需要再去查数据库
-            stringRedisTemplate.opsForValue().set(key, "", CACHE_NULL_TTL, TimeUnit.MINUTES);
-            //返回错误信息
-            return null;
-
-        }
-
-            //4. case2 数据库中存在，写入redis
-            // JSONUtil.toJsonStr 对象 --> Json
-            stringRedisTemplate.opsForValue().set(key, JSONUtil.toJsonStr(shop), CACHE_SHOP_TTL, TimeUnit.MINUTES);
-
-            //5.返回
-            return shop;
-    }
+//    public Shop queryWithPassThrough(Long id) {
+//        String key = CACHE_SHOP_KEY + id;
+//        //1.从redis查询商铺缓存
+//        String shopJson = stringRedisTemplate.opsForValue().get(key);
+//        //2.判断是否存在
+//        if (StrUtil.isNotBlank(shopJson)) {
+//            //3.存在，直接返回
+//            //JSONUtil.toBean --> Json转对象
+//            Shop shop = JSONUtil.toBean(shopJson, Shop.class);
+//            return shop;
+//        }
+//        // 判断命中的是否是空值  （击穿问题）
+//        if (shopJson != null) {
+//            //返回错误信息
+//            return null;
+//        }
+//
+//        //4. 不存在 根据id查询数据库
+//        Shop shop = getById(id);
+//
+//
+//        //4. case1 数据库中不存在，返回错误
+//        if (shop == null) {
+//            //将空值写入redis （击穿问题）
+//            //这里设置为“”之后 再去看 shopJson != null 的判断 能直接返回错误信息 从而不需要再去查数据库
+//            stringRedisTemplate.opsForValue().set(key, "", CACHE_NULL_TTL, TimeUnit.MINUTES);
+//            //返回错误信息
+//            return null;
+//
+//        }
+//
+//            //4. case2 数据库中存在，写入redis
+//            // JSONUtil.toJsonStr 对象 --> Json
+//            stringRedisTemplate.opsForValue().set(key, JSONUtil.toJsonStr(shop), CACHE_SHOP_TTL, TimeUnit.MINUTES);
+//
+//            //5.返回
+//            return shop;
+//    }
 
     
     public Shop queryWithMutex(Long id) {
