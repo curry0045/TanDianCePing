@@ -7,6 +7,9 @@ import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 
+/**
+ * id生成器 -- 实现全局唯一id
+ */
 @Component
 public class RedisIdWorker {
     /**
