@@ -29,27 +29,27 @@ public class SimpleRedisLock implements ILock {
 
     @Override
     public boolean tryLock(long timeoutSec) {
-        // 获取线程标示
+        // 获取线程标识
         String threadId = ID_PREFIX + Thread.currentThread().getId();
         // 获取锁
         Boolean success = stringRedisTemplate.opsForValue()
                 .setIfAbsent(KEY_PREFIX + name, threadId, timeoutSec, TimeUnit.SECONDS);
-        return Boolean.TRUE.equals(success);
+        return Boolean.TRUE.equals(success); //Boolean 到boolean 会自动拆箱 会有空指针异常
     }
 
     @Override
     public void unlock() {
-        // 调用lua脚本
+        //使用lua脚本进行改造误删一人一单锁的并发问题
         stringRedisTemplate.execute(
                 UNLOCK_SCRIPT,
-                Collections.singletonList(KEY_PREFIX + name),
+                Collections.singletonList(KEY_PREFIX + name),//单元素集合
                 ID_PREFIX + Thread.currentThread().getId());
     }
     /*@Override
     public void unlock() {
-        // 获取线程标示
+        // 获取线程标识
         String threadId = ID_PREFIX + Thread.currentThread().getId();
-        // 获取锁中的标示
+        // 获取锁中的标识
         String id = stringRedisTemplate.opsForValue().get(KEY_PREFIX + name);
         // 判断标示是否一致
         if(threadId.equals(id)) {
