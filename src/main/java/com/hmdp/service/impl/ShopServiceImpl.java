@@ -4,6 +4,7 @@ import cn.hutool.core.util.BooleanUtil;
 import cn.hutool.core.util.StrUtil;
 import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.fasterxml.jackson.databind.util.JSONPObject;
 import com.hmdp.dto.Result;
@@ -13,12 +14,20 @@ import com.hmdp.service.IShopService;
 import com.hmdp.utils.CacheClient;
 import com.hmdp.utils.RedisConstants;
 import com.hmdp.utils.RedisData;
+import com.hmdp.utils.SystemConstants;
+import io.lettuce.core.api.async.RedisGeoAsyncCommands;
+import org.springframework.data.geo.Distance;
+import org.springframework.data.geo.GeoResult;
+import org.springframework.data.geo.GeoResults;
+import org.springframework.data.redis.connection.RedisGeoCommands;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.domain.geo.GeoReference;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import javax.annotation.Resource;
 import java.time.LocalDateTime;
+import java.util.*;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -253,5 +262,72 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
         //2.删除缓存
         stringRedisTemplate.delete(CACHE_SHOP_KEY+ id);
         return Result.ok();
+    }
+
+    @Override
+    public Result queryShopById(Integer typeId, Integer current, Double x, Double y) {
+
+        //1.判断是否需要根据坐标查询
+        if (x == null || y == null){
+            //不需要坐标查询 按照数据库查询
+            // 根据类型分页查询
+            Page<Shop> page = query()
+                    .eq("type_id", typeId)
+                    .page(new Page<>(current, SystemConstants.DEFAULT_PAGE_SIZE));
+            // 返回数据
+            return Result.ok(page.getRecords());
+        }
+
+        //2.计算分页参数
+        int from = (current - 1) * SystemConstants.DEFAULT_PAGE_SIZE; //当前页起始索引（如第 1 页从 0 开始，第 2 页从 5 开始）。
+        int end = current * SystemConstants.DEFAULT_PAGE_SIZE;//当前页结束索引（如第 1 页取前 5 条，end=5）。
+
+
+        //3.查询redis 按照距离排序、分页 结果：shopId、distance
+        String key = SHOP_GEO_KEY + typeId;
+
+        //GEOSEARCH key BYLONLAT(圆) x y BYRADIUS（圆心） 10 WITHDISTANCE
+        GeoResults<RedisGeoCommands.GeoLocation<String>> results = stringRedisTemplate.opsForGeo()
+                .search(
+                        key,//Redis键（存储该类型店铺地理信息）
+                        GeoReference.fromCoordinate(x, y),// 参考点（当前经纬度）
+                        new Distance(5000),// 搜索半径（5000米）
+                        RedisGeoCommands.GeoRadiusCommandArgs.newGeoSearchArgs().includeDistance()// 关键：包含距离信息
+                                .limit(end)// 限制返回最多end条数据
+        );
+
+
+        //4.解析出id
+        if (results == null){
+            return  Result.ok(Collections.emptyList());
+        }
+        List<GeoResult<RedisGeoCommands.GeoLocation<String>>> list = results.getContent();
+        if (list.size() <= from){
+            //没有下一页
+            return  Result.ok(Collections.emptyList());
+        }
+
+        //4.1 截取from - end 的部分
+        List<Long> ids = new ArrayList<>(list.size());
+        Map<String, Distance> distanceMap = new HashMap<>(list.size());
+        list.stream().skip(from).forEach(result -> {
+            //4.2 获取店铺id
+            String shopIdStr = result.getContent().getName();
+            ids.add(Long.valueOf(shopIdStr));
+            // 4.3.获取距离
+            Distance distance = result.getDistance();
+            distanceMap.put(shopIdStr, distance);
+
+        });
+        //5.根据id查询Shop
+        String idStr = StrUtil.join(",", ids);
+        //强制按 Redis 返回的 ID 顺序排序（保证与距离排序一致，近的在前）
+        List<Shop> shops = query().in("id", ids).last("ORDER BY FIELD(id," + idStr + ")").list();
+        for (Shop shop : shops) {
+            shop.setDistance(distanceMap.get(shop.getId().toString()).getValue());
+        }
+
+        //6.返回
+        return Result.ok(shops);
     }
 }

@@ -19,6 +19,8 @@ public class RedisConstants {
     public static final String CACHE_TYPE_LIST = "cache_type_list";
     public static final String BLOG_LIKED_KEY = "blog:liked:";
     public static final String FEED_KEY = "feed:";
+    public static final String SHOP_GEO_KEY = "shop:geo:";
+
 
 
 }
